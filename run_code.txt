@@ -1,0 +1,19 @@
+🔹 Steps to create & activate venv
+Open terminal in your project folder
+Run this command to create a venv:
+
+1.
+
+             python -m venv venv
+
+2.
+
+            venv\Scripts\activate
+
+3.
+
+            pip install streamlit requests python-dotenv SpeechRecognition pyaudio
+
+4.
+
+            streamlit run app.py
