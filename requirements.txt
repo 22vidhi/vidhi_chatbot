@@ -1,0 +1,14 @@
+streamlit
+openai
+
+streamlit
+requests
+python-dotenv
+speechrecognition
+pyaudio
+SpeechRecognition
+
+
+streamlit
+SpeechRecognition
+PyAudio
