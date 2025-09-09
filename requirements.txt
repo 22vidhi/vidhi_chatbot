@@ -1,14 +1,25 @@
+# Core UI
 streamlit
-openai
 
-streamlit
+# Basic dependencies
 requests
-python-dotenv
-speechrecognition
-pyaudio
-SpeechRecognition
+python-docx
+reportlab
+python-pptx
+openai
+PyPDF2
+aiofiles
 
+# AI/ML dependencies
+transformers
+sentence-transformers
+faiss-cpu
+chromadb
+langchain
 
-streamlit
-SpeechRecognition
-PyAudio
+# Google Gemini AI
+google-generativeai
+
+# Development & Testing
+pytest
+python-multipart
