@@ -67,7 +67,7 @@ streamlit run streamlit_ra_app.py
 1. **Push to GitHub**
    ```bash
    git add .
-   git commit -m "Add RA Agent deployment"
+   git commit -m "Complete RA Agent deployment"
    git push origin main
    ```
 
