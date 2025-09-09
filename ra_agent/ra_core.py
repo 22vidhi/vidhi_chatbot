@@ -66,13 +66,44 @@ class DualAISynthesizer:
     """Handles dual AI processing (Perplexity + ChatGPT-5)"""
 
     def __init__(self):
-        self.openai_client = AsyncOpenAI(api_key=st.secrets.get("OPENAI_API_KEY"))
-        self.gemini_model = GenerativeModel('gemini-1.5-pro')
+        self.openai_client = None
+        self.gemini_model = None
+
+    def _get_openai_client(self):
+        """Lazy initialization of OpenAI client"""
+        if self.openai_client is None:
+            api_key = st.secrets.get("OPENAI_API_KEY")
+            if not api_key:
+                # For testing/development without secrets
+                import os
+                api_key = os.getenv("OPENAI_API_KEY")
+            if api_key:
+                self.openai_client = AsyncOpenAI(api_key=api_key)
+            else:
+                raise ValueError("OPENAI_API_KEY not found in secrets or environment")
+        return self.openai_client
+
+    def _get_gemini_model(self):
+        """Lazy initialization of Gemini model"""
+        if self.gemini_model is None:
+            api_key = st.secrets.get("GOOGLE_API_KEY")
+            if not api_key:
+                # For testing/development without secrets
+                import os
+                api_key = os.getenv("GOOGLE_API_KEY")
+            if api_key:
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+                self.gemini_model = genai.GenerativeModel('gemini-1.5-pro')
+            else:
+                raise ValueError("GOOGLE_API_KEY not found in secrets or environment")
+        return self.gemini_model
 
     async def query_perplexity(self, prompt: str, context: str) -> Dict:
         """Query Perplexity AI service"""
         try:
-            response = await self.openai_client.chat.completions.create(
+            client = self._get_openai_client()
+            response = await client.chat.completions.create(
                 model="gpt-3.5-turbo",  # Perplexity uses OpenAI-compatible API
                 messages=[
                     {"role": "system", "content": f"You are an RA expert. Context: {context}"},
@@ -95,7 +126,8 @@ class DualAISynthesizer:
     async def query_chatgpt(self, prompt: str, context: str) -> Dict:
         """Query ChatGPT-5"""
         try:
-            response = await self.openai_client.chat.completions.create(
+            client = self._get_openai_client()
+            response = await client.chat.completions.create(
                 model="gpt-4",
                 messages=[
                     {"role": "system", "content": f"You are an RA expert. Context: {context}"},
@@ -149,9 +181,7 @@ class DualAISynthesizer:
     async def query_gemini(self, prompt: str, context: str) -> Dict:
         """Query Google Gemini"""
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=st.secrets.get("GOOGLE_API_KEY"))
-            model = genai.GenerativeModel('gemini-1.5-pro')
+            model = self._get_gemini_model()
             response = model.generate_content(prompt)
             return {
                 "ai": "gemini",
