@@ -16,14 +16,21 @@ import uuid
 import streamlit as st
 from openai import AsyncOpenAI
 from google.generativeai import GenerativeModel
-import chromadb
-from chromadb.config import Settings
+import os
+import json
+from typing import List, Dict, Any
+import pathlib
+from pathlib import Path
 import PyPDF2
 from docx import Document
 from pptx import Presentation
 from reportlab.pdfgen import canvas
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer
+from reportlab.lib.pagesizes import letter
+
+# Simplified Knowledge Base - no external vector DB dependencies
+from collections import defaultdict
+import math
+import re
 
 @dataclass
 class DocumentManifest:
@@ -221,16 +228,47 @@ class DocumentGenerator:
             return False
 
 class KnowledgeManager:
-    """Manages RA knowledge base with RAG"""
+    """Manages RA knowledge base with simple storage (no ChromaDB dependency)"""
 
     def __init__(self):
-        self.chroma_client = chromadb.EphemeralClient()
-        self.collection = self.chroma_client.get_or_create_collection("ra_kb")
-        self.encoder = SentenceTransformer('all-MiniLM-L6-v2')
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200
-        )
+        self.knowledge_path = Path("ra_agent/knowledge_base.json")
+        self.knowledge = self._load_knowledge_base()
+
+    def _load_knowledge_base(self) -> Dict[str, List[str]]:
+        """Load knowledge base from JSON file"""
+        if self.knowledge_path.exists():
+            try:
+                with open(self.knowledge_path, 'r') as f:
+                    return json.load(f)
+            except:
+                pass
+        return defaultdict(list)
+
+    def _save_knowledge_base(self):
+        """Save knowledge base to JSON file"""
+        try:
+            with open(self.knowledge_path, 'w') as f:
+                json.dump(dict(self.knowledge), f)
+        except Exception as e:
+            print(f"Failed to save knowledge base: {e}")
+
+    def _simple_search(self, query: str, text: str) -> float:
+        """Simple text matching score (0-1)"""
+        query_lower = query.lower()
+        text_lower = text.lower()
+
+        # Exact phrase match
+        if query_lower in text_lower:
+            return 1.0
+
+        # Word matching
+        query_words = set(query_lower.split())
+        text_words = set(text_lower.split())
+        if len(query_words) > 0:
+            match_ratio = len(query_words.intersection(text_words)) / len(query_words)
+            return min(match_ratio, 1.0)
+
+        return 0.0
 
     async def add_document(self, doc_path: Path, doc_meta: Dict) -> bool:
         """Add RA document to knowledge base"""
@@ -252,54 +290,57 @@ class KnowledgeManager:
                 with open(doc_path, 'r', encoding='utf-8') as file:
                     text = file.read()
 
-            # Split into chunks
-            chunks = self.text_splitter.split_text(text)
+            # Split into paragraphs/sentences
+            paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
 
-            # Generate embeddings
-            embeddings = self.encoder.encode(chunks)
+            # Store by doc type and keywords
+            doc_type = doc_meta.get('doc_type', 'general')
+            keywords = doc_meta.get('keywords', [doc_type])
 
-            # Add to ChromaDB
-            ids = [f"{doc_meta['doc_id']}_{i}" for i in range(len(chunks))]
-            metadatas = [
-                {
-                    **doc_meta,
-                    "chunk_id": i,
-                    "text": chunk
-                } for i, chunk in enumerate(chunks)
-            ]
+            for para in paragraphs:
+                if len(para.strip()) > 20:  # Skip very short paragraphs
+                    for keyword in keywords:
+                        self.knowledge[keyword.lower()].append({
+                            'content': para,
+                            'doc_id': doc_meta['doc_id'],
+                            'doc_type': doc_type,
+                            'source': str(doc_path.name)
+                        })
 
-            self.collection.add(
-                embeddings=embeddings.tolist(),
-                documents=chunks,
-                ids=ids,
-                metadatas=metadatas
-            )
-
+            self._save_knowledge_base()
             return True
         except Exception as e:
             st.error(f"Document ingestion error: {e}")
             return False
 
     async def search_relevant_docs(self, query: str, top_k: int = 5) -> List[Dict]:
-        """Search for relevant RA documents"""
+        """Search for relevant RA documents with simple matching"""
         try:
-            query_embedding = self.encoder.encode([query])
-            results = self.collection.query(
-                query_embeddings=query_embedding.tolist(),
-                n_results=top_k
-            )
+            results = []
+            query_lower = query.lower()
 
-            docs = []
-            for i, doc in enumerate(results['documents']):
-                docs.append({
-                    "content": doc,
-                    "metadata": results['metadatas'][i] if results['metadatas'] else {},
-                    "distance": results['distances'][i] if results['distances'] else None
-                })
+            # Search across all keywords
+            for keyword, docs in self.knowledge.items():
+                if keyword in query_lower or any(word in keyword for word in query_lower.split()):
+                    for doc in docs:
+                        score = self._simple_search(query, doc['content'])
+                        if score > 0.3:  # Minimum relevance threshold
+                            results.append({
+                                'content': doc['content'][:500] + "..." if len(doc['content']) > 500 else doc['content'],
+                                'metadata': {
+                                    'doc_id': doc['doc_id'],
+                                    'doc_type': doc['doc_type'],
+                                    'source': doc['source']
+                                },
+                                'score': score
+                            })
 
-            return docs
+            # Sort by relevance and return top_k
+            results.sort(key=lambda x: x['score'], reverse=True)
+            return results[:top_k]
+
         except Exception as e:
-            st.error(f"Document search error: {e}")
+            st.error(f"Search error: {e}")
             return []
 
 class RAAgent:
